@@ -1,0 +1,23 @@
+appId: com.familymemories.app
+productName: FamilyMemories
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - app/models/**/*
+  - package.json
+asarUnpack:
+  # ネイティブモジュールと ONNX モデルは asar の外に展開する
+  - "**/node_modules/better-sqlite3/**"
+  - "**/node_modules/sharp/**"
+  - "**/node_modules/onnxruntime-node/**"
+  - "**/node_modules/hnswlib-node/**"
+  - "**/app/models/**"
+mac:
+  category: public.app-category.photography
+  target:
+    - dmg
+win:
+  target:
+    - nsis

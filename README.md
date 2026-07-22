@@ -1,0 +1,96 @@
+# 家族思い出スライドショー & 写真整理アプリ（P1 / デスクトップ）
+
+散らばった家族の写真・動画（〜10万ファイル規模）を、PC 内の AI が
+**(a) 実際に整理整頓（物理再配置）** し、**(b) 美しいスライドショーとして再生** する
+クロスプラットフォーム・デスクトップアプリ。すべての処理は PC 内で完結し、クラウド送信はありません。
+
+本リポジトリは「システム構成設計書 v3」および「P1 実装計画」に基づく実装です。
+
+## アーキテクチャ（P1 §3）
+
+```
+main (Electron)         : ライフサイクル・ウィンドウ・IPC 中継
+  └ utilityProcess:core : コアエンジン（索引/解析/整理/キュレーション/演出/ジョブ）
+       └ (将来) worker_threads : ML/ハッシュ/画像処理の並列ワーカープール
+renderer (React + Vite) : UI。core とは型付き IPC で通信
+```
+
+重い処理は core（utilityProcess）に隔離し、renderer の UI をブロックしません。
+renderer↔core は型付き IPC ラッパ（`app/shared/ipc.ts`）で、リクエスト/レスポンス＋進捗イベントを扱います。
+
+## ディレクトリ構成
+
+```
+app/
+  main/       Electron main・preload・IPC ブリッジ
+  renderer/   React UI（Vite）: 思い出一覧 / 仮想化ライブラリ / 整理レビュー / プレイヤー / 設定
+  core/       ヘッドレスコア
+    source/     SourceProvider（ローカル/外付け・他アプリ管理下検出）
+    index/      Indexer + MediaProbe（EXIF/寸法/知覚ハッシュ/サムネ）
+    analysis/   MLAdapter・解析パイプライン・クラスタリング・知覚ハッシュ
+    ann/        VectorIndex(HNSW/ブルートフォース) / HashIndex(BK-tree)
+    organize/   Dedup / Junk / Restructure(安全移動) / Undo / 命名規則
+    curation/   イベント検出・ベストショット選抜
+    direction/  Ken Burns・タイムライン生成
+    jobs/       JobOrchestrator（再開可能・一時停止可能）
+    store/      SQLite リポジトリ + InMemoryStore（テスト用）
+    fileop/     FileOpAdapter（OS ゴミ箱連携・チェックサム・ボリューム判定）
+  shared/     型定義・IPC コントラクト
+  models/     バンドル ONNX モデル（差し替え可能）
+  migrations/ SQL DDL
+tests/        受け入れ/ユニットテスト（§7.4 の安全な移動パイプライン他）
+```
+
+## 安全第一：物理再配置（設計書 v3 §3.3 / P1 §7）★最重要
+
+取り返しのつかない家族写真を実際に動かすため、次を厳守します。
+
+- **非破壊が既定**（`proposeRestructure` はプレビューのみ・原本を一切変更しない）
+- **ドライラン／プレビュー**（全移動計画・命名衝突・必要空き容量を実行前に提示）
+- **中断・クラッシュ耐性**：1 ファイル単位で状態(`restructure_item.state`)を即コミットし、
+  起動時 `recoverOnStartup` で続きから再開／必要ならロールバック
+- **ドライブ跨ぎは コピー→チェックサム照合→元をゴミ箱** の順（単純移動しない）
+- **完全な物理的可逆性**：操作ジャーナルを逆再生し元の場所へ戻す（Undo）
+- **他アプリ管理下フォルダの除外**（Apple Photos / Lightroom 等）
+- **削除はゴミ箱送り**（即時完全削除なし）
+
+この中核ロジック（`app/core/organize/restructure.ts`）は、ネイティブ依存なしで
+完全にユニットテストできるよう設計されており、`tests/restructure.test.ts` が
+P1 §7.4 の受け入れテスト（同一ドライブ大量 rename / ドライブ跨ぎ copy→verify→trash /
+コピー途中クラッシュからの再開 / checksum 不一致で原本保全 / 命名衝突連番 /
+空き容量不足で中止 / Undo）をすべて検証します。
+
+## 開発
+
+```bash
+npm install            # 依存導入（ネイティブモジュール含む）
+npm run typecheck      # 型チェック
+npm test               # 全テスト（§7.4 含む）
+npm run dev:renderer   # renderer 開発サーバー（Vite）
+npm run build          # core/main/preload + renderer をビルド
+npm start              # Electron 起動（要 build）
+npm run dist           # electron-builder で Mac/Win 配布物を生成
+```
+
+> テスト・型チェックはネイティブモジュールのビルド無しでも動きます
+> （`npm install --ignore-scripts` で可）。CI もこの前提で動作します。
+
+## スケール設計（〜10万ファイル・設計書 v3 §9）
+
+- 顔クラスタリング・重複検出は **ANN 近傍検索**で O(n²) を回避
+- 初回解析は**再開可能な長時間ジョブ**（途中終了しても続きから）
+- ライブラリ UI は**仮想化**（可視分のみ描画）
+- サムネ/プレビューは**構造化キャッシュ**
+
+## 実装状況（P1 マイルストーン）
+
+- **M0** スキャフォールド（Electron/TS/Vite/React + 型付き IPC + SQLite マイグレーション）… ✅
+- **M1** 取り込み・索引 + 再開可能ジョブ基盤 … ✅
+- **M2** 解析（顔/品質・モック ML）+ ANN（HNSW / BK-tree）+ クラスタリング/重複 … ✅
+- **M3** 整理エンジン（安全な移動パイプライン・§7.4 テスト全通過・Undo・起動時再開）… ✅
+- **M4** キュレーション（イベント検出/選抜）+ 演出（Ken Burns/タイムライン）… ✅
+- **M5** プレイヤー UI（仮想化一覧・全画面プレイヤー・整理レビュー）… ✅
+- **M6** 設定・オンボーディング … ✅
+
+ML は実モデル確定前のため `MockMLAdapter`（決定論的）で先行。実モデルは `app/models/` に置き、
+`MLAdapter` 越しに差し替えます（P1 §11）。

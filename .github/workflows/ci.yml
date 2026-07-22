@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # ネイティブ依存(better-sqlite3/sharp 等)のビルドは CI では不要。
+      # コアの受け入れテスト(§7.4 含む)は純 JS + 一時 fs で完結する。
+      - name: Install (skip native postinstall)
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: Test (§7.4 安全な移動パイプライン他)
+        run: npx vitest run
