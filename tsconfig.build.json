@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "app",
+    "types": ["node"],
+    "noEmit": false,
+    "declaration": false
+  },
+  // renderer は Vite がバンドルするので tsc の対象外。
+  "include": ["app/core/**/*.ts", "app/main/**/*.ts", "app/shared/**/*.ts"]
+}
