@@ -7,7 +7,8 @@
 
 import type { DuplicateGroup, MediaItem } from '../../shared/types.js';
 import { newId, now } from '../../shared/util.js';
-import { BKTree } from '../ann/bkTree.js';
+import type { HashIndex } from '../ann/bkTree.js';
+import { LshBandIndex } from '../ann/lshIndex.js';
 
 export interface DedupInput {
   media: MediaItem[];
@@ -15,6 +16,11 @@ export interface DedupInput {
   qualityOf?: (mediaId: string) => number;
   /** 近似重複とみなすハミング距離の上限。 */
   maxHamming?: number;
+  /**
+   * 近傍索引の差し替え。既定は LSH バンド索引（10万規模でも準線形）。
+   * BK-tree も HashIndex を実装するので注入可能。
+   */
+  hashIndex?: HashIndex;
 }
 
 class UnionFind {
@@ -40,7 +46,7 @@ class UnionFind {
 
 export function buildDuplicateGroups(input: DedupInput): DuplicateGroup[] {
   const { media } = input;
-  const maxHamming = input.maxHamming ?? 6;
+  const maxHamming = input.maxHamming ?? 5;
   const qualityOf = input.qualityOf ?? (() => 0);
   const uf = new UnionFind();
   const byId = new Map(media.map((m) => [m.id, m]));
@@ -57,13 +63,14 @@ export function buildDuplicateGroups(input: DedupInput): DuplicateGroup[] {
     for (let i = 1; i < ids.length; i++) uf.union(ids[0], ids[i]);
   }
 
-  // 近似重複: 知覚ハッシュ BK-tree。
-  const tree = new BKTree();
+  // 近似重複: 知覚ハッシュの近傍索引（既定 LSH バンド・準線形）。
+  // 帯数 = maxHamming + 1 とし、鳩の巣原理で取りこぼしを防ぐ。
+  const index = input.hashIndex ?? new LshBandIndex(maxHamming + 1);
   for (const m of media) {
     if (!m.perceptualHash) continue;
-    const near = tree.near(m.perceptualHash, maxHamming);
+    const near = index.near(m.perceptualHash, maxHamming);
     for (const otherId of near) uf.union(m.id, otherId);
-    tree.add(m.id, m.perceptualHash);
+    index.add(m.id, m.perceptualHash);
   }
 
   // root -> メンバー集約。単独（重複なし）は除外。

@@ -22,6 +22,9 @@ export interface NodeFileOpOptions {
  * - trash は差し替え可能（本番=OS ゴミ箱 / テスト=擬似ゴミ箱）。
  */
 export class NodeFileOpAdapter implements FileOpAdapter {
+  // ディレクトリ→device 番号のキャッシュ。10万件の再配置で per-file の stat を避ける。
+  private deviceCache = new Map<string, number>();
+
   constructor(private readonly opts: NodeFileOpOptions = {}) {}
 
   async sameVolume(a: string, b: string): Promise<boolean> {
@@ -31,11 +34,16 @@ export class NodeFileOpAdapter implements FileOpAdapter {
   }
 
   private async deviceOf(p: string): Promise<number> {
+    // 同一ディレクトリ内のファイルは同一 device なので、dir 単位でキャッシュする。
+    const dir = path.dirname(path.resolve(p));
+    const cached = this.deviceCache.get(dir);
+    if (cached !== undefined) return cached;
     // 対象が未作成でも、存在する最も近い親ディレクトリの device を見る。
     let cur = path.resolve(p);
     for (;;) {
       try {
         const st = await fs.stat(cur);
+        this.deviceCache.set(dir, st.dev);
         return st.dev;
       } catch {
         const parent = path.dirname(cur);

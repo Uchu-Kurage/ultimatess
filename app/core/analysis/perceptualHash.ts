@@ -31,7 +31,25 @@ function bitsToHex(bits: number[]): string {
   return hex;
 }
 
-/** 2 つの 16 進ハッシュのハミング距離（異なるビット数）。 */
+// 16 進 1 文字(charCode) → nibble 値の即値テーブル（parseInt を避け大規模で高速化）。
+const NIBBLE = buildNibbleTable();
+// nibble(0..15) の popcount テーブル。
+const POP4 = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
+
+function buildNibbleTable(): Int8Array {
+  const t = new Int8Array(128).fill(-1);
+  for (let c = 0; c <= 9; c++) t['0'.charCodeAt(0) + c] = c;
+  for (let c = 0; c < 6; c++) {
+    t['a'.charCodeAt(0) + c] = 10 + c;
+    t['A'.charCodeAt(0) + c] = 10 + c;
+  }
+  return t;
+}
+
+/**
+ * 2 つの 16 進ハッシュのハミング距離（異なるビット数）。
+ * 10万件規模の重複検出で大量に呼ばれるため、charCode ルックアップ + popcount テーブルで実装。
+ */
 export function hammingDistance(a: string, b: string): number {
   if (a.length !== b.length) {
     // 長さが違えば比較不能。最大距離を返す。
@@ -39,11 +57,9 @@ export function hammingDistance(a: string, b: string): number {
   }
   let dist = 0;
   for (let i = 0; i < a.length; i++) {
-    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16);
-    while (x) {
-      dist += x & 1;
-      x >>= 1;
-    }
+    const na = NIBBLE[a.charCodeAt(i)];
+    const nb = NIBBLE[b.charCodeAt(i)];
+    dist += POP4[(na ^ nb) & 0xf];
   }
   return dist;
 }

@@ -109,16 +109,12 @@ describe('数百件規模の Undo（ドライブ跨ぎ）', () => {
 
 async function countFiles(dir: string): Promise<number> {
   let n = 0;
-  let entries: Awaited<ReturnType<typeof fs.readdir>>;
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-  for (const e of entries) {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) n += await countFiles(full);
-    else if (e.isFile() && !e.name.endsWith('.part')) n += 1;
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  for (const name of names) {
+    const full = path.join(dir, name);
+    const st = await fs.stat(full);
+    if (st.isDirectory()) n += await countFiles(full);
+    else if (st.isFile() && !name.endsWith('.part')) n += 1;
   }
   return n;
 }

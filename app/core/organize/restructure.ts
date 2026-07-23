@@ -10,6 +10,7 @@
 // ============================================================================
 
 import * as fs from 'node:fs/promises';
+import * as nodePath from 'node:path';
 import type {
   MediaItem,
   NamingRule,
@@ -51,6 +52,9 @@ export class RestructureEngine {
     const conflicts: RestructureConflict[] = [];
     const rows: RestructureItemRow[] = [];
     const assigned = new Set<string>();
+    // ディレクトリ単位でディスク上の既存ファイルをキャッシュし、
+    // 100k 件でも per-file の syscall を避ける（新規ライブラリなら実質ゼロ）。
+    const dirCache = new DirCache();
     let spaceRequired = 0;
 
     for (const media of this.store.allMedia()) {
@@ -65,7 +69,7 @@ export class RestructureEngine {
       let seq = 0;
       let toPath = base;
       // eslint-disable-next-line no-await-in-loop
-      while (assigned.has(toPath) || (await pathExists(toPath))) {
+      while (assigned.has(toPath) || (await dirCache.exists(toPath))) {
         seq += 1;
         toPath = withSequence(base, seq);
       }
@@ -281,12 +285,26 @@ export class RestructureEngine {
 
 // ---- 小さなヘルパ ----
 
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
+/**
+ * ディレクトリ単位で既存ファイル集合をキャッシュする衝突判定。
+ * per-file の fs.access を、per-dir の readdir 1 回に置き換える。
+ * 新規ライブラリ（対象ディレクトリが存在しない）なら readdir すら発生しない。
+ */
+class DirCache {
+  private entries = new Map<string, Set<string> | null>(); // null = ディレクトリ非存在
+
+  async exists(filePath: string): Promise<boolean> {
+    const dir = nodePath.dirname(filePath);
+    const base = nodePath.basename(filePath);
+    let set = this.entries.get(dir);
+    if (set === undefined) {
+      set = await fs
+        .readdir(dir)
+        .then((names) => new Set(names))
+        .catch(() => null);
+      this.entries.set(dir, set);
+    }
+    return set ? set.has(base) : false;
   }
 }
 
