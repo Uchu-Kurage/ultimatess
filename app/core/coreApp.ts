@@ -312,10 +312,24 @@ export class CoreApp {
         ...(this.mobileIndexPath ? { mobileIndexPath: this.mobileIndexPath } : {}),
       });
     }
-    const { port } = await this.server.listen(this.serverPort, '0.0.0.0');
-    this.serverUrl = this.lanUrl(port);
+    // LAN インターフェースのみにバインドする(§A-2)。全インターフェース(0.0.0.0)には
+    // 公開しない。LAN IPv4 が見つからない隔離環境ではループバックに退避する。
+    const host = this.lanHost();
+    const { port } = await this.server.listen(this.serverPort, host);
+    this.serverUrl = `http://${host}:${port}`;
     const pin = this.pairing.generatePin();
     return { running: true, info: { url: this.serverUrl, pin: pin.pin, expiresAt: pin.expiresAt } };
+  }
+
+  /** バインド対象の LAN IPv4（無ければ 127.0.0.1）。 */
+  private lanHost(): string {
+    const ifaces = os.networkInterfaces();
+    for (const list of Object.values(ifaces)) {
+      for (const ni of list ?? []) {
+        if (ni.family === 'IPv4' && !ni.internal) return ni.address;
+      }
+    }
+    return '127.0.0.1';
   }
 
   private async stopServer(): Promise<void> {
@@ -326,15 +340,9 @@ export class CoreApp {
     }
   }
 
-  /** LAN 上の到達 URL（内部/ループバックでない IPv4 を選ぶ）。 */
+  /** LAN 上の到達 URL（バインドと同じ LAN IPv4 を用いる）。 */
   private lanUrl(port: number): string {
-    const ifaces = os.networkInterfaces();
-    for (const list of Object.values(ifaces)) {
-      for (const ni of list ?? []) {
-        if (ni.family === 'IPv4' && !ni.internal) return `http://${ni.address}:${port}`;
-      }
-    }
-    return `http://127.0.0.1:${port}`;
+    return `http://${this.lanHost()}:${port}`;
   }
 
   listJobsSnapshot(): Job[] {
