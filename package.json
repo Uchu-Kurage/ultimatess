@@ -16,7 +16,9 @@
     "build": "npm run build:node && npm run build:renderer",
     "dev:renderer": "vite",
     "start": "electron .",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "rebuild": "electron-rebuild -f",
+    "postinstall": "node scripts/rebuild-native.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
@@ -30,6 +32,7 @@
     "trash": "^9.0.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/fluent-ffmpeg": "^2.1.26",
     "@types/node": "^22.7.0",

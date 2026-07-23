@@ -92,8 +92,18 @@ npm run dist           # electron-builder で Mac/Win 配布物を生成
 - **M5** プレイヤー UI（仮想化一覧・全画面プレイヤー・整理レビュー）… ✅
 - **M6** 設定・オンボーディング … ✅
 
-ML は実モデル確定前のため `MockMLAdapter`（決定論的）で先行。実モデルは `app/models/` に置き、
-`MLAdapter` 越しに差し替えます（P1 §11）。
+ML は `app/models/` に実 ONNX モデル + `models.json` を置くと `NodeMLAdapter`
+（onnxruntime-node / GPU 実行プロバイダ対応）が自動で有効化され、無ければ `MockMLAdapter`
+（決定論的）にフォールバックします（`app/core/analysis/mlAdapterFactory.ts`）。設定手順は
+`app/models/README.md` を参照。
+
+### ネイティブモジュールの Electron 向け再ビルド
+
+`better-sqlite3` / `sharp` / `onnxruntime-node` 等は Electron の ABI 向けに再ビルドが必要です。
+`npm install` の **postinstall で `@electron/rebuild` が自動実行**されます
+（`scripts/rebuild-native.mjs`）。Electron が無い CI/テスト環境や `--ignore-scripts`、
+`SKIP_ELECTRON_REBUILD=1` では自動スキップされ、通常インストールを壊しません。
+手動で再実行する場合は `npm run rebuild`。
 
 ## P2（スマホ参照・人物機能・整理の高度化）
 

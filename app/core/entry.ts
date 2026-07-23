@@ -12,6 +12,7 @@ import type {
   IpcChannel,
   IpcRequest,
 } from '../shared/ipc.js';
+import { createMLAdapter } from './analysis/mlAdapterFactory.js';
 import { CoreApp } from './coreApp.js';
 import { NodeFileOpAdapter } from './fileop/nodeFileOpAdapter.js';
 import { NodeMediaProbe } from './index/nodeMediaProbe.js';
@@ -33,10 +34,14 @@ async function main(): Promise<void> {
   const fileop = new NodeFileOpAdapter();
   const probe = new NodeMediaProbe(cacheDir);
   const mobileIndexPath = resolveMobileIndex();
+  // 実 ONNX モデルがあれば NodeMLAdapter、無ければ MockMLAdapter を使う。
+  const modelsDir = resolveModelsDir();
+  const ml = await createMLAdapter(modelsDir);
   const core = new CoreApp({
     store,
     fileop,
     probe,
+    ml,
     cacheDir,
     ...(mobileIndexPath ? { mobileIndexPath } : {}),
   });
@@ -67,6 +72,18 @@ function resolveMobileIndex(): string | undefined {
   ];
   for (const c of candidates) if (fs.existsSync(c)) return c;
   return undefined;
+}
+
+/** ONNX モデルディレクトリを dev/packaged 双方で探す。 */
+function resolveModelsDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, '../../app/models'),
+    path.resolve(here, '../../../app/models'),
+    path.resolve(process.cwd(), 'app/models'),
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return candidates[candidates.length - 1];
 }
 
 main().catch((err) => {
