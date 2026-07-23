@@ -3,7 +3,9 @@
 // main とは parentPort の型付きメッセージ (shared/ipc.ts のワイヤ表現) で通信する。
 // ============================================================================
 
+import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   CoreInboundMessage,
   CoreOutboundMessage,
@@ -30,7 +32,14 @@ async function main(): Promise<void> {
   const store = new SqliteStore(dbPath);
   const fileop = new NodeFileOpAdapter();
   const probe = new NodeMediaProbe(cacheDir);
-  const core = new CoreApp({ store, fileop, probe });
+  const mobileIndexPath = resolveMobileIndex();
+  const core = new CoreApp({
+    store,
+    fileop,
+    probe,
+    cacheDir,
+    ...(mobileIndexPath ? { mobileIndexPath } : {}),
+  });
   core.setEmitter((event, payload) => post({ type: 'event', event, payload }));
 
   parentPort.on('message', async (e: { data: CoreInboundMessage }) => {
@@ -46,6 +55,18 @@ async function main(): Promise<void> {
 
   await core.recoverOnStartup();
   post({ type: 'event', event: 'log', payload: { level: 'info', message: 'core ready' } });
+}
+
+/** スマホ Web クライアント HTML を dev/packaged 双方で探す。 */
+function resolveMobileIndex(): string | undefined {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, '../../app/mobile/index.html'),
+    path.resolve(here, '../../../app/mobile/index.html'),
+    path.resolve(process.cwd(), 'app/mobile/index.html'),
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return undefined;
 }
 
 main().catch((err) => {

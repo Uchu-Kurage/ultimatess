@@ -6,6 +6,7 @@ directories:
 files:
   - dist/**/*
   - app/models/**/*
+  - app/mobile/**/*
   - package.json
 asarUnpack:
   # ネイティブモジュールと ONNX モデルは asar の外に展開する

@@ -30,6 +30,13 @@ export interface RestructureOptions {
   stopOnError?: boolean;
   /** media ごとの命名コンテキスト（イベント名/場所名）を解決する。 */
   resolveContext?: (item: MediaItem) => NamingContext;
+  /**
+   * P2: to_path の決定を差し替える（命名テンプレート等）。
+   * 返すのは絶対パス（連番付与は本エンジンが行う）。§7 の安全パイプラインは不変。
+   */
+  resolveTargetPath?: (item: MediaItem, targetRoot: string) => string;
+  /** P2: 対象 media を絞り込む（外付けアーカイブで年別に限定する等）。 */
+  filter?: (item: MediaItem) => boolean;
 }
 
 export type ProgressCb = (done: number, total: number) => void;
@@ -61,9 +68,13 @@ export class RestructureEngine {
       const root = this.store.getRoot(media.rootId);
       // 他アプリ管理下 root は再配置対象から除外(§2-3 / §7.1-3)。
       if (root?.managedByOtherApp) continue;
+      // P2: 絞り込み（年別アーカイブ等）。
+      if (this.opts.filter && !this.opts.filter(media)) continue;
 
       const ctx = this.opts.resolveContext?.(media) ?? { placeName: media.placeName };
-      const base = computeTargetPath(media, ctx, naming, targetRoot);
+      const base = this.opts.resolveTargetPath
+        ? this.opts.resolveTargetPath(media, targetRoot)
+        : computeTargetPath(media, ctx, naming, targetRoot);
 
       // 命名衝突（計画内の重複 or 既存ファイル）に連番付与。
       let seq = 0;

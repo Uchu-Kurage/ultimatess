@@ -7,8 +7,10 @@
 
 import type {
   AnalysisStatus,
+  Device,
   DuplicateGroup,
   Face,
+  FaceFeedback,
   Job,
   JobStatus,
   MediaItem,
@@ -114,6 +116,36 @@ export interface Store {
   // ---- 設定 ----
   getSetting(key: string): string | null;
   setSetting(key: string, value: string): void;
+
+  // ========================================================================
+  // P2 追加
+  // ========================================================================
+
+  // ---- 人物 / 顔フィードバック (M10) ----
+  getPerson(id: string): Person | null;
+  getPersonByCluster(clusterId: string): Person | null;
+  listActivePersons(): Person[];
+  setPersonMergedInto(id: string, into: string): void;
+  addFaceFeedback(f: FaceFeedback): void;
+  listFaceFeedback(): FaceFeedback[];
+  listFeedbackForPerson(personId: string): FaceFeedback[];
+  addClusterMergeLog(id: string, from: string, into: string, createdAt: number): void;
+
+  // ---- メディア: 動画プロキシ (M8) ----
+  setVideoProxyPath(id: string, proxyPath: string): void;
+  getVideoProxyPath(id: string): string | null;
+  listVideosWithoutProxy(limit?: number): MediaItem[];
+
+  // ---- ルート命名テンプレート (M11) ----
+  setRootTemplate(rootId: string, templateJson: string): void;
+  getRootTemplate(rootId: string): string | null;
+
+  // ---- デバイス / ペアリング (M7) ----
+  addDevice(d: Device): void;
+  getDeviceByToken(token: string): Device | null;
+  listDevices(): Device[];
+  revokeDevice(id: string): void;
+  touchDevice(id: string, lastSeen: number): void;
 
   close(): void;
 }

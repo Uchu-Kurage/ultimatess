@@ -8,6 +8,12 @@ import type { MediaItem, Story, StoryItem } from '../../shared/types.js';
 import { newId } from '../../shared/util.js';
 import type { Store } from '../store/store.js';
 
+export interface PersonStoryOptions {
+  /** 1 人物あたり最低この枚数がないとストーリー化しない。 */
+  minPhotos?: number;
+  heroCount?: number;
+}
+
 export interface CurationOptions {
   /** イベント境界とみなす時間ギャップ(ms)。既定 6 時間。 */
   gapMs?: number;
@@ -94,6 +100,61 @@ export class CurationEngine {
     }));
     this.store.replaceStoryItems(storyId, items);
     return storyId;
+  }
+
+  /**
+   * 人物別ストーリー(§B-5)。名前付き人物ごとに、その人物が写る写真を
+   * 期間で束ねてストーリー化し、P1 同様ベストショット選抜を適用する。
+   */
+  async buildPersonStories(opts: PersonStoryOptions = {}): Promise<string[]> {
+    const minPhotos = opts.minPhotos ?? 5;
+    const heroCount = opts.heroCount ?? 3;
+
+    // cluster_id -> その人物が写る mediaId 集合
+    const mediaByCluster = new Map<string, Set<string>>();
+    for (const f of this.store.listAllFaces()) {
+      if (!f.clusterId) continue;
+      const set = mediaByCluster.get(f.clusterId) ?? new Set<string>();
+      set.add(f.mediaId);
+      mediaByCluster.set(f.clusterId, set);
+    }
+
+    const ids: string[] = [];
+    for (const person of this.store.listActivePersons()) {
+      if (!person.displayName) continue; // 名前付きのみ
+      const mediaIds = mediaByCluster.get(person.clusterId);
+      if (!mediaIds || mediaIds.size < minPhotos) continue;
+
+      const members = [...mediaIds]
+        .map((id) => this.store.getMedia(id))
+        .filter((m): m is MediaItem => m != null)
+        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      if (members.length < minPhotos) continue;
+
+      const storyId = newId('story');
+      const ranked = [...members].sort(
+        (a, b) => (this.qualityOf(b.id) ?? 0) - (this.qualityOf(a.id) ?? 0),
+      );
+      const heroSet = new Set(ranked.slice(0, heroCount).map((m) => m.id));
+      const story: Story = {
+        id: storyId,
+        title: `${person.displayName}の思い出`,
+        kind: 'person',
+        startAt: members[0].createdAt ?? null,
+        endAt: members[members.length - 1].createdAt ?? null,
+        coverMediaId: ranked[0]?.id,
+      };
+      this.store.createStory(story);
+      const items: StoryItem[] = members.map((m, i) => ({
+        storyId,
+        mediaId: m.id,
+        order: i,
+        role: heroSet.has(m.id) ? 'hero' : 'support',
+      }));
+      this.store.replaceStoryItems(storyId, items);
+      ids.push(storyId);
+    }
+    return ids;
   }
 
   private qualityOf(mediaId: string): number | null {

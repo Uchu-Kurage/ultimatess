@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
 import { fm } from '../bridge.js';
-import { DEFAULT_NAMING_RULE } from '../../shared/types.js';
-import type { OrganizeProposal, RestructurePlan } from '../../shared/types.js';
+import { DEFAULT_NAMING_RULE, DEFAULT_TEMPLATE } from '../../shared/types.js';
+import type { OrganizeProposal, RestructurePlan, SpaceReport } from '../../shared/types.js';
 
 /** 整理レビュー画面 (M5)。提案 → プレビュー → 承認 → 実行 → Undo の動線。 */
 export function Organize(): React.ReactElement {
   const [proposal, setProposal] = useState<OrganizeProposal | null>(null);
   const [plan, setPlan] = useState<RestructurePlan | null>(null);
   const [targetRoot, setTargetRoot] = useState('');
+  const [template, setTemplate] = useState(DEFAULT_TEMPLATE.template);
+  const [useTemplate, setUseTemplate] = useState(false);
+  const [archiveYear, setArchiveYear] = useState('');
+  const [report, setReport] = useState<SpaceReport | null>(null);
   const [msg, setMsg] = useState('');
 
   const propose = async (kind: 'dedup' | 'junk'): Promise<void> => {
@@ -28,12 +32,31 @@ export function Organize(): React.ReactElement {
 
   const previewRestructure = async (): Promise<void> => {
     if (!targetRoot.trim()) return;
-    const p = await fm.invoke('organize:proposeRestructure', {
-      targetRoot: targetRoot.trim(),
-      naming: DEFAULT_NAMING_RULE,
-    });
+    const p = useTemplate
+      ? await fm.invoke('organize:proposeRestructureTemplate', {
+          targetRoot: targetRoot.trim(),
+          template: { ...DEFAULT_TEMPLATE, template },
+        })
+      : await fm.invoke('organize:proposeRestructure', {
+          targetRoot: targetRoot.trim(),
+          naming: DEFAULT_NAMING_RULE,
+        });
     setPlan(p);
     setMsg('');
+  };
+
+  const previewArchive = async (): Promise<void> => {
+    if (!targetRoot.trim() || !archiveYear.trim()) return;
+    const p = await fm.invoke('organize:proposeArchive', {
+      year: archiveYear.trim(),
+      targetRoot: targetRoot.trim(),
+    });
+    setPlan(p);
+    setMsg(`${archiveYear} 年の原本を外付けへアーカイブ（派生はPCに残ります）。`);
+  };
+
+  const loadReport = async (): Promise<void> => {
+    setReport(await fm.invoke('organize:spaceReport', {}));
   };
 
   const applyRestructure = async (): Promise<void> => {
@@ -104,6 +127,18 @@ export function Organize(): React.ReactElement {
             プレビュー生成
           </button>
         </div>
+        <label className="chk">
+          <input type="checkbox" checked={useTemplate} onChange={(e) => setUseTemplate(e.target.checked)} />
+          命名テンプレートを使う
+        </label>
+        {useTemplate && (
+          <div className="row">
+            <input className="input" value={template} onChange={(e) => setTemplate(e.target.value)} />
+            <span className="hint">
+              トークン: {'{yyyy} {MM} {dd} {HHmmss} {event} {place} {person} {original}'}。日付不明は隔離。
+            </span>
+          </div>
+        )}
         {plan && (
           <div className="plan">
             <div className="plan-stats">
@@ -133,6 +168,68 @@ export function Organize(): React.ReactElement {
             <button className="btn ghost" onClick={() => undo(plan.id)}>
               実行後に元へ戻す（Undo）
             </button>
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>外付けへアーカイブ</h2>
+        <p className="hint">
+          古い年の原本を外付けへ移動します。派生キャッシュはPCに残るので、外付け未接続でも
+          一覧・スライドショーは通常どおり動作します。移動はP1の安全パイプラインを再利用します。
+        </p>
+        <div className="row">
+          <input
+            className="input"
+            placeholder="年（例: 2019）"
+            value={archiveYear}
+            onChange={(e) => setArchiveYear(e.target.value)}
+            style={{ maxWidth: 120 }}
+          />
+          <span className="hint">↑の「整理先ルート」を外付けのパスにしてください</span>
+          <button className="btn" onClick={previewArchive}>
+            アーカイブをプレビュー
+          </button>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>空き容量</h2>
+        <button className="btn" onClick={loadReport}>
+          回収可能容量を計算
+        </button>
+        {report && (
+          <div className="report">
+            <div className="plan-stats">
+              <div>
+                合計 <strong>{fmtBytes(report.totalBytes)}</strong>
+              </div>
+              <div>
+                重複 <strong>{fmtBytes(report.reclaimable.duplicates)}</strong>
+              </div>
+              <div>
+                不要 <strong>{fmtBytes(report.reclaimable.junk)}</strong>
+              </div>
+              <div>
+                動画プロキシ <strong>{fmtBytes(report.reclaimable.videoProxies)}</strong>
+              </div>
+            </div>
+            <h3>年別</h3>
+            <ul className="plan-list">
+              {report.byYear.slice(0, 12).map((y) => (
+                <li key={y.year}>
+                  <span className="tag same">{y.year}</span> {y.count} 件 · {fmtBytes(y.bytes)}
+                </li>
+              ))}
+            </ul>
+            <h3>大きいファイル</h3>
+            <ul className="plan-list">
+              {report.largest.slice(0, 10).map((f) => (
+                <li key={f.mediaId}>
+                  <span className="tag cross">{fmtBytes(f.bytes)}</span> <code>{shorten(f.sourceRef)}</code>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </section>

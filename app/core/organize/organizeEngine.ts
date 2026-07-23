@@ -5,17 +5,24 @@
 // ============================================================================
 
 import type {
+  FolderDiffNode,
   MediaItem,
   NamingRule,
+  NamingTemplate,
   OperationJournalEntry,
   OrganizeProposal,
   RestructurePlan,
+  SpaceReport,
 } from '../../shared/types.js';
+import { DEFAULT_NAMING_RULE } from '../../shared/types.js';
 import { newId, now } from '../../shared/util.js';
 import type { FileOpAdapter } from '../fileop/fileOpAdapter.js';
 import type { Store } from '../store/store.js';
+import { buildFolderDiff } from './folderDiff.js';
 import { detectJunk } from './junk.js';
 import { RestructureEngine, type ProgressCb, type RestructureOptions } from './restructure.js';
+import { buildSpaceReport } from './spaceReport.js';
+import { computeTemplatePath, type TemplateContext } from './templateNaming.js';
 
 const REF_TYPE_PROPOSAL = 'organize_proposal';
 
@@ -57,6 +64,60 @@ export class OrganizeEngine {
 
   proposeRestructure(targetRoot: string, naming: NamingRule): Promise<RestructurePlan> {
     return this.restructure.proposeRestructure(targetRoot, naming);
+  }
+
+  // ---- P2 §C: 高度な再配置（テンプレート / アーカイブ） ----
+
+  /**
+   * 命名テンプレートで再配置プランを生成(§C-1)。to_path の決め方だけが変わり、
+   * 実行・Undo・再開は P1 と同じ安全パイプラインを使う。
+   */
+  proposeRestructureTemplate(
+    targetRoot: string,
+    template: NamingTemplate,
+    resolveCtx?: (item: MediaItem) => TemplateContext,
+  ): Promise<RestructurePlan> {
+    const engine = new RestructureEngine(this.store, this.fileop, {
+      resolveTargetPath: (item, root) =>
+        computeTemplatePath(item, resolveCtx?.(item) ?? { place: item.placeName }, template, root),
+    });
+    return engine.proposeRestructure(targetRoot, DEFAULT_NAMING_RULE);
+  }
+
+  /**
+   * 外付けアーカイブのプラン(§C-3)。指定年の原本を外付けへ移すが、
+   * 派生キャッシュ(thumb/preview)は PC に残るため未接続でも一覧・再生は動く。
+   * 移動には P1 の安全パイプラインをそのまま再利用する。
+   */
+  proposeArchive(year: string, targetRoot: string): Promise<RestructurePlan> {
+    const engine = new RestructureEngine(this.store, this.fileop, {
+      filter: (item) =>
+        item.createdAt != null && String(new Date(item.createdAt).getUTCFullYear()) === year,
+    });
+    return engine.proposeRestructure(targetRoot, DEFAULT_NAMING_RULE);
+  }
+
+  /** Before/After フォルダ差分(§C-2)。 */
+  folderDiff(plan: RestructurePlan): FolderDiffNode {
+    return buildFolderDiff(plan.items, plan.targetRoot);
+  }
+
+  /** 保存済みプラン ID から Before/After 差分を作る。 */
+  folderDiffByPlanId(planId: string): FolderDiffNode {
+    const plan = this.store.getRestructurePlan(planId);
+    if (!plan) throw new Error(`plan not found: ${planId}`);
+    const items = this.store.listRestructureItems(planId).map((i) => ({
+      mediaId: i.mediaId,
+      fromPath: i.fromPath,
+      toPath: i.toPath,
+      sameDrive: i.sameDrive,
+    }));
+    return buildFolderDiff(items, plan.targetRoot);
+  }
+
+  /** 回収可能容量レポート(§C-3)。 */
+  spaceReport(): Promise<SpaceReport> {
+    return buildSpaceReport(this.store);
   }
 
   // ---- 実行 ----

@@ -94,3 +94,28 @@ npm run dist           # electron-builder で Mac/Win 配布物を生成
 
 ML は実モデル確定前のため `MockMLAdapter`（決定論的）で先行。実モデルは `app/models/` に置き、
 `MLAdapter` 越しに差し替えます（P1 §11）。
+
+## P2（スマホ参照・人物機能・整理の高度化）
+
+P1 の安全性を一切後退させない前提で、P2 の 3 テーマを実装済み。
+
+- **M7 サーバー基盤とペアリング** … `app/core/server/`。core 内 HTTP サーバー、PIN+長期トークン認証、
+  デバイス管理・失効。未認証は拒否、書き込み系 API は非公開（閲覧専用）、LAN のみ。
+- **M8 メディア配信と動画プロキシ** … 派生アセット（サムネ/プレビュー/H.264 プロキシ）のみを配信。
+  **キャッシュ配下限定 + ID→パス解決**でパストラバーサルを構造的に排除。動画は HTTP Range 対応。
+  H.264 プロキシ生成は再開可能ジョブ（`app/core/media/videoProxy.ts`）。
+- **M9 スマホ Web UI** … `app/mobile/index.html`（自己完結）をサーバーが `/` で公開。宣言的タイムライン
+  JSON をそのまま受け取り CSS で Ken Burns 再生、プリフェッチ・タップ開始・Wake Lock（HTTP は best-effort）。
+- **M10 人物機能** … `app/core/persons/` + `constrainedClustering.ts`。命名・統合・分割・除外、
+  `face_feedback`（confirm=must-link / reject=cannot-link）による**制約付き増分クラスタリング**。
+  **訂正は再クラスタリング後も巻き戻らない**（テストで担保）。人物別ストーリー生成。
+- **M11 再配置の高度化** … `templateNaming.ts`。命名テンプレート（`{yyyy}{event}{place}{person}…`）、
+  fallback 順、`date_uncertain` の隔離、Before/After フォルダ差分。**§7 の安全パイプラインは不変**で、
+  変わるのは to_path の決め方だけ（§7.4 を回帰テストとして維持）。
+- **M12 空き容量最適化** … `spaceReport.ts`。回収可能容量（重複/不要/動画プロキシ）・年別使用量・
+  大きいファイル一覧。外付けアーカイブは**P1 の安全パイプラインを再利用**し、派生キャッシュは PC に残すため
+  外付け未接続でも一覧・再生が可能。
+
+P2 の受け入れ条件（スマホ閲覧専用・LAN 内・原本非配信・訂正の永続・§7.4 維持）は
+`tests/persons.test.ts` `tests/server.test.ts` `tests/templateNaming.test.ts` `tests/spaceArchive.test.ts`
+および P1 回帰（`tests/restructure.test.ts` / `tests/undoScale.test.ts`）で検証しています。

@@ -8,13 +8,19 @@
 // ============================================================================
 
 import type {
+  Device,
+  FolderDiffNode,
   Job,
   JobKind,
   MediaItem,
   NamingRule,
+  NamingTemplate,
   OrganizeProposal,
+  PairingInfo,
+  PersonDTO,
   RestructurePlan,
   RootFolder,
+  SpaceReport,
   Story,
   Timeline,
 } from './types.js';
@@ -67,6 +73,44 @@ export interface IpcRequestMap {
   // 設定
   'settings:get': { req: { key: string }; res: string | null };
   'settings:set': { req: { key: string; value: string }; res: void };
+
+  // ===== P2 =====
+
+  // A/M7: サーバー & ペアリング & デバイス
+  'server:start': { req: Record<string, never>; res: { running: boolean; info?: PairingInfo } };
+  'server:stop': { req: Record<string, never>; res: void };
+  'server:status': { req: Record<string, never>; res: { running: boolean; url?: string } };
+  'server:generatePin': { req: Record<string, never>; res: PairingInfo };
+  'devices:list': { req: Record<string, never>; res: Device[] };
+  'devices:revoke': { req: { deviceId: string }; res: void };
+
+  // A/M8: 動画プロキシ生成
+  'media:startVideoProxy': { req: Record<string, never>; res: { jobId: string } };
+
+  // B/M10: 人物
+  'persons:list': { req: Record<string, never>; res: PersonDTO[] };
+  'persons:listUnnamed': { req: Record<string, never>; res: PersonDTO[] };
+  'persons:rename': { req: { personId: string; name: string }; res: void };
+  'persons:setCover': { req: { personId: string; faceId: string }; res: void };
+  'persons:toggleFavorite': { req: { personId: string }; res: void };
+  'persons:confirmFace': { req: { faceId: string; personId: string }; res: void };
+  'persons:rejectFace': { req: { faceId: string; personId: string }; res: void };
+  'persons:merge': { req: { fromId: string; intoId: string }; res: void };
+  'persons:recluster': { req: Record<string, never>; res: void };
+  'curation:buildPersonStories': { req: Record<string, never>; res: string[] };
+
+  // C/M11: 高度な再配置
+  'source:setTemplate': { req: { rootId: string; template: NamingTemplate }; res: void };
+  'source:getTemplate': { req: { rootId: string }; res: NamingTemplate | null };
+  'organize:proposeRestructureTemplate': {
+    req: { targetRoot: string; template: NamingTemplate };
+    res: RestructurePlan;
+  };
+  'organize:proposeArchive': { req: { year: string; targetRoot: string }; res: RestructurePlan };
+  'organize:folderDiff': { req: { planId: string }; res: FolderDiffNode };
+
+  // C/M12: 空き容量最適化
+  'organize:spaceReport': { req: Record<string, never>; res: SpaceReport };
 }
 
 export type IpcChannel = keyof IpcRequestMap;

@@ -111,6 +111,25 @@ code { color: var(--accent); }
 .jobbar { display: flex; gap: 18px; padding: 8px 16px; border-top: 1px solid var(--border); background: var(--panel); }
 .jobbar-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 
+/* 共有（スマホ） */
+.pair-url, .pair-pin { margin: 8px 0; font-size: 16px; }
+.pin { font-size: 28px; letter-spacing: .2em; color: var(--accent); }
+.device-list { list-style: none; padding: 0; }
+.device { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.device.revoked { opacity: .5; }
+.device-name { font-weight: 600; }
+.device-sub { color: var(--muted); font-size: 12px; }
+
+/* 人物 */
+.person-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+.person-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px; text-align: center; }
+.person-card.sel { border-color: var(--accent); }
+.person-cover { height: 90px; border-radius: 10px; background: linear-gradient(135deg,#2a3346,#3a2f4a); display: flex; align-items: flex-start; justify-content: flex-end; padding: 6px; color: gold; }
+.person-name { font-weight: 600; margin-top: 8px; }
+.person-sub { color: var(--muted); font-size: 12px; }
+.person-actions { display: flex; gap: 6px; justify-content: center; margin-top: 8px; }
+.report h3 { margin: 12px 0 6px; font-size: 14px; }
+
 /* 設定 */
 .root-list { list-style: none; padding: 0; }
 .root { display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }

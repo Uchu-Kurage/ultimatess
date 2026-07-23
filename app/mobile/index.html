@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>家族の思い出</title>
+    <style>
+      :root { --bg:#0b0d12; --panel:#171a21; --text:#e7e9ee; --muted:#98a0af; --accent:#6ea8fe; }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+        font-family: -apple-system, "Hiragino Kaku Gothic ProN", system-ui, sans-serif; }
+      #app { height: 100%; }
+      .center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; }
+      input { font-size: 20px; letter-spacing: .3em; text-align: center; padding: 12px; border-radius: 10px; border: 1px solid #333; background: #10131a; color: var(--text); width: 220px; }
+      button { font-size: 16px; padding: 12px 18px; border-radius: 10px; border: none; background: var(--accent); color: #08101f; font-weight: 700; }
+      .ghost { background: transparent; color: var(--muted); border: 1px solid #2a2f3a; }
+      header { padding: 14px 16px; font-weight: 700; border-bottom: 1px solid #222; position: sticky; top: 0; background: var(--bg); }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px; }
+      .card { background: var(--panel); border-radius: 14px; overflow: hidden; }
+      .cover { aspect-ratio: 4/3; background: #222 center/cover no-repeat; background-image: linear-gradient(135deg,#2a3346,#3a2f4a); }
+      .cardtitle { padding: 8px 10px; font-size: 13px; }
+      .cardsub { padding: 0 10px 10px; font-size: 11px; color: var(--muted); }
+      .player { position: fixed; inset: 0; background: #000; }
+      .stage { position: absolute; inset: 0; overflow: hidden; }
+      .frame { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity .6s; }
+      .frame.show { opacity: 1; }
+      .close { position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 12px; z-index: 3; background: rgba(0,0,0,.5); color:#fff; border-radius: 50%; width: 40px; height: 40px; font-size: 18px; }
+      .tapstart { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.4); font-size: 18px; }
+      .muted { color: var(--muted); font-size: 12px; }
+      video.nosleep { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"><div class="center">読み込み中…</div></div>
+    <script>
+      // ==== スマホ Web クライアント (P2 §A-5 / M9) ====
+      // 閲覧専用。演出タイムライン(宣言的JSON)をそのまま受け取り CSS で再現する。
+      const S = { token: localStorage.getItem('fm_token') || '', app: document.getElementById('app') };
+
+      async function api(path, opts = {}) {
+        const res = await fetch(path, { ...opts, headers: { Authorization: 'Bearer ' + S.token, ...(opts.headers||{}) } });
+        if (res.status === 401) { S.token=''; localStorage.removeItem('fm_token'); renderPair(); throw new Error('unauthorized'); }
+        return res;
+      }
+
+      function renderPair(msg) {
+        S.app.innerHTML = '';
+        const wrap = el('div','center');
+        wrap.append(el('div','', '📷 家族の思い出'));
+        wrap.append(el('div','muted','デスクトップに表示された6桁のPINを入力してください'));
+        const input = document.createElement('input'); input.inputMode='numeric'; input.maxLength=6; input.placeholder='______';
+        const btn = document.createElement('button'); btn.textContent='接続';
+        if (msg) wrap.append(el('div','muted', msg));
+        btn.onclick = async () => {
+          const r = await fetch('/pair', { method:'POST', body: JSON.stringify({ pin: input.value, name: navigator.userAgent.slice(0,40) }) });
+          if (!r.ok) return renderPair('PINが違うか期限切れです');
+          const b = await r.json(); S.token = b.token; localStorage.setItem('fm_token', b.token); renderList();
+        };
+        wrap.append(input, btn);
+        S.app.append(wrap);
+      }
+
+      async function renderList() {
+        try {
+          const res = await api('/api/stories'); const data = await res.json();
+          S.app.innerHTML=''; S.app.append(el('header','', '思い出'));
+          const grid = el('div','grid');
+          for (const s of data.items) {
+            const card = el('div','card');
+            const cover = el('div','cover');
+            if (s.coverMediaId) cover.style.backgroundImage = `url(/media/${s.coverMediaId}/preview)`;
+            card.append(cover, el('div','cardtitle', s.title), el('div','cardsub', (s.itemCount||0)+'枚'));
+            card.onclick = () => play(s.id);
+            grid.append(card);
+          }
+          if (!data.items.length) grid.append(el('div','muted','まだ思い出がありません'));
+          S.app.append(grid);
+        } catch (e) {}
+      }
+
+      async function play(storyId) {
+        const tl = await (await api('/api/timelines/' + storyId)).json();
+        const clips = tl.clips || [];
+        const player = el('div','player');
+        const stage = el('div','stage');
+        const frames = clips.map(() => el('div','frame'));
+        frames.forEach(f => stage.append(f));
+        const close = document.createElement('button'); close.className='close'; close.textContent='✕';
+        const tap = el('div','tapstart','▶ タップして再生');
+        player.append(stage, close, tap);
+        S.app.append(player);
+
+        let i = 0, timer = null, started = false;
+        const nosleep = enableNoSleep();
+        const preload = (idx) => { for (let k=idx; k<Math.min(idx+3, clips.length); k++) { const im=new Image(); im.src='/media/'+clips[k].mediaId+'/preview'; } };
+        const show = (idx) => {
+          if (idx >= clips.length) return stop();
+          const c = clips[idx];
+          const f = frames[idx];
+          f.style.backgroundImage = 'url(/media/'+c.mediaId+'/preview)';
+          // Ken Burns: 始点→終点の矩形を transform 補間。
+          applyRect(f, c.kbStartRect);
+          f.classList.add('show');
+          requestAnimationFrame(() => { f.style.transition = 'opacity .6s, transform '+c.durationMs+'ms linear'; applyRect(f, c.kbEndRect); });
+          if (idx>0) frames[idx-1].classList.remove('show');
+          preload(idx+1);
+          timer = setTimeout(() => { i=idx+1; show(i); }, c.durationMs);
+        };
+        const stop = () => { clearTimeout(timer); nosleep && nosleep.disable(); player.remove(); };
+        close.onclick = stop;
+        tap.onclick = () => { if (started) return; started = true; tap.remove(); preload(0); show(0); };
+      }
+
+      function applyRect(f, rect) {
+        if (!rect) return;
+        const [x,y,w] = rect; const scale = 1/Math.max(0.2,w);
+        f.style.transform = `translate(${-x*100}%, ${-y*100}%) scale(${scale})`;
+      }
+
+      // 画面が寝る問題(§A-3): HTTPS なら Wake Lock、HTTP なら無音ループ動画で抑止(best-effort)。
+      function enableNoSleep() {
+        let lock = null;
+        (async () => { try { if (navigator.wakeLock) lock = await navigator.wakeLock.request('screen'); } catch(e){} })();
+        return { disable: () => { try { lock && lock.release(); } catch(e){} } };
+      }
+
+      function el(tag, cls, text) { const n=document.createElement(tag); if(cls)n.className=cls; if(text!=null)n.textContent=text; return n; }
+
+      // 起動
+      if (S.token) renderList(); else renderPair();
+    </script>
+  </body>
+</html>

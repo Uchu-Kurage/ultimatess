@@ -6,8 +6,10 @@
 import type {
   AnalysisStatus,
   BBox,
+  Device,
   DuplicateGroup,
   Face,
+  FaceFeedback,
   Job,
   JobStatus,
   MediaItem,
@@ -161,19 +163,23 @@ export class SqliteStore implements Store {
   upsertPerson(p: Person): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO person (id, cluster_id, display_name, cover_face_id, is_favorite)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO person
+         (id, cluster_id, display_name, cover_face_id, is_favorite, confirmed, merged_into, person_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.id, p.clusterId, p.displayName ?? null, p.coverFaceId ?? null, p.isFavorite ? 1 : 0);
+      .run(
+        p.id,
+        p.clusterId,
+        p.displayName ?? null,
+        p.coverFaceId ?? null,
+        p.isFavorite ? 1 : 0,
+        p.confirmed ? 1 : 0,
+        p.mergedInto ?? null,
+        p.personKey ?? null,
+      );
   }
   listPersons(): Person[] {
-    return (this.db.prepare(`SELECT * FROM person`).all() as any[]).map((r) => ({
-      id: r.id,
-      clusterId: r.cluster_id,
-      displayName: r.display_name ?? undefined,
-      coverFaceId: r.cover_face_id ?? undefined,
-      isFavorite: !!r.is_favorite,
-    }));
+    return (this.db.prepare(`SELECT * FROM person`).all() as any[]).map(rowToPerson);
   }
 
   // ---- 品質 / シーン ----
@@ -471,9 +477,117 @@ export class SqliteStore implements Store {
     this.db.prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)`).run(key, value);
   }
 
+  // ---- P2: 人物 / フィードバック ----
+  getPerson(id: string): Person | null {
+    const r = this.db.prepare(`SELECT * FROM person WHERE id = ?`).get(id) as any;
+    return r ? rowToPerson(r) : null;
+  }
+  getPersonByCluster(clusterId: string): Person | null {
+    const r = this.db.prepare(`SELECT * FROM person WHERE cluster_id = ? LIMIT 1`).get(clusterId) as any;
+    return r ? rowToPerson(r) : null;
+  }
+  listActivePersons(): Person[] {
+    return (this.db.prepare(`SELECT * FROM person WHERE merged_into IS NULL`).all() as any[]).map(rowToPerson);
+  }
+  setPersonMergedInto(id: string, into: string): void {
+    this.db.prepare(`UPDATE person SET merged_into = ? WHERE id = ?`).run(into, id);
+  }
+  addFaceFeedback(f: FaceFeedback): void {
+    this.db
+      .prepare(`INSERT INTO face_feedback (id, face_id, person_id, verdict, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(f.id, f.faceId, f.personId, f.verdict, f.createdAt);
+  }
+  listFaceFeedback(): FaceFeedback[] {
+    return (this.db.prepare(`SELECT * FROM face_feedback`).all() as any[]).map(rowToFeedback);
+  }
+  listFeedbackForPerson(personId: string): FaceFeedback[] {
+    return (this.db.prepare(`SELECT * FROM face_feedback WHERE person_id = ?`).all(personId) as any[]).map(
+      rowToFeedback,
+    );
+  }
+  addClusterMergeLog(id: string, from: string, into: string, createdAt: number): void {
+    this.db
+      .prepare(`INSERT INTO cluster_merge_log (id, from_cluster, into_cluster, created_at) VALUES (?, ?, ?, ?)`)
+      .run(id, from, into, createdAt);
+  }
+
+  // ---- P2: 動画プロキシ ----
+  setVideoProxyPath(id: string, proxyPath: string): void {
+    this.db.prepare(`UPDATE media_item SET video_proxy_path = ? WHERE id = ?`).run(proxyPath, id);
+  }
+  getVideoProxyPath(id: string): string | null {
+    const r = this.db.prepare(`SELECT video_proxy_path FROM media_item WHERE id = ?`).get(id) as any;
+    return r?.video_proxy_path ?? null;
+  }
+  listVideosWithoutProxy(limit?: number): MediaItem[] {
+    const rows = limit
+      ? this.db
+          .prepare(`SELECT * FROM media_item WHERE media_type = 'video' AND video_proxy_path IS NULL LIMIT ?`)
+          .all(limit)
+      : this.db.prepare(`SELECT * FROM media_item WHERE media_type = 'video' AND video_proxy_path IS NULL`).all();
+    return (rows as any[]).map(rowToMedia);
+  }
+
+  // ---- P2: ルート命名テンプレート ----
+  setRootTemplate(rootId: string, templateJson: string): void {
+    this.db.prepare(`UPDATE root_folder SET naming_template = ? WHERE id = ?`).run(templateJson, rootId);
+  }
+  getRootTemplate(rootId: string): string | null {
+    const r = this.db.prepare(`SELECT naming_template FROM root_folder WHERE id = ?`).get(rootId) as any;
+    return r?.naming_template ?? null;
+  }
+
+  // ---- P2: デバイス ----
+  addDevice(d: Device): void {
+    this.db
+      .prepare(`INSERT OR REPLACE INTO device (id, name, token, created_at, last_seen, revoked) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(d.id, d.name, d.token, d.createdAt, d.lastSeen, d.revoked ? 1 : 0);
+  }
+  getDeviceByToken(token: string): Device | null {
+    const r = this.db.prepare(`SELECT * FROM device WHERE token = ? AND revoked = 0`).get(token) as any;
+    return r ? rowToDevice(r) : null;
+  }
+  listDevices(): Device[] {
+    return (this.db.prepare(`SELECT * FROM device ORDER BY created_at DESC`).all() as any[]).map(rowToDevice);
+  }
+  revokeDevice(id: string): void {
+    this.db.prepare(`UPDATE device SET revoked = 1 WHERE id = ?`).run(id);
+  }
+  touchDevice(id: string, lastSeen: number): void {
+    this.db.prepare(`UPDATE device SET last_seen = ? WHERE id = ?`).run(lastSeen, id);
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+function rowToPerson(r: any): Person {
+  return {
+    id: r.id,
+    clusterId: r.cluster_id,
+    displayName: r.display_name ?? undefined,
+    coverFaceId: r.cover_face_id ?? undefined,
+    isFavorite: !!r.is_favorite,
+    confirmed: !!r.confirmed,
+    mergedInto: r.merged_into ?? undefined,
+    personKey: r.person_key ?? undefined,
+  };
+}
+
+function rowToFeedback(r: any): FaceFeedback {
+  return { id: r.id, faceId: r.face_id, personId: r.person_id, verdict: r.verdict, createdAt: r.created_at };
+}
+
+function rowToDevice(r: any): Device {
+  return {
+    id: r.id,
+    name: r.name ?? '',
+    token: r.token,
+    createdAt: r.created_at,
+    lastSeen: r.last_seen,
+    revoked: !!r.revoked,
+  };
 }
 
 // ---- 行 -> ドメイン変換 ----

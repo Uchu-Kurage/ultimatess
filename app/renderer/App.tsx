@@ -9,13 +9,17 @@ import { Stories } from './components/Stories.js';
 import { JobsPanel } from './components/JobsPanel.js';
 import { Settings } from './components/Settings.js';
 import { JobBar } from './components/JobBar.js';
+import { Persons } from './components/Persons.js';
+import { Sharing } from './components/Sharing.js';
 
-type Tab = 'stories' | 'library' | 'organize' | 'jobs' | 'settings';
+type Tab = 'stories' | 'library' | 'persons' | 'organize' | 'sharing' | 'jobs' | 'settings';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'stories', label: '思い出' },
   { id: 'library', label: 'ライブラリ' },
+  { id: 'persons', label: '人物' },
   { id: 'organize', label: '整理' },
+  { id: 'sharing', label: '共有' },
   { id: 'jobs', label: 'ジョブ' },
   { id: 'settings', label: '設定' },
 ];
@@ -57,7 +61,9 @@ export function App(): React.ReactElement {
       <main className="content">
         {tab === 'stories' && <Stories />}
         {tab === 'library' && <Library roots={roots} />}
+        {tab === 'persons' && <Persons />}
         {tab === 'organize' && <Organize />}
+        {tab === 'sharing' && <Sharing />}
         {tab === 'jobs' && <JobsPanel />}
         {tab === 'settings' && <Settings roots={roots} onChange={reloadRoots} />}
       </main>

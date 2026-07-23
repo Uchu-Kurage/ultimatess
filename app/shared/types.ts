@@ -71,6 +71,25 @@ export interface Person {
   displayName?: string;
   coverFaceId?: string;
   isFavorite: boolean;
+  /** ユーザーが名前を確定済みか（P2-B）。 */
+  confirmed?: boolean;
+  /** 統合された場合の統合先 person_id（P2-B）。 */
+  mergedInto?: string;
+  /** clusterId から独立した安定キー（再クラスタで人物同一性を保つ）。 */
+  personKey?: string;
+}
+
+// ---- P2-B 人物訂正フィードバック ----
+
+export type FeedbackVerdict = 'confirm' | 'reject';
+
+export interface FaceFeedback {
+  id: string;
+  faceId: string;
+  personId: string;
+  /** confirm = must-link（この顔はこの人物）/ reject = cannot-link（この人物ではない）。 */
+  verdict: FeedbackVerdict;
+  createdAt: number;
 }
 
 export interface QualityScore {
@@ -101,7 +120,7 @@ export interface DuplicateMember {
 
 // ---- ジョブ & 物理再配置 ----
 
-export type JobKind = 'index' | 'analyze' | 'dedup' | 'restructure';
+export type JobKind = 'index' | 'analyze' | 'dedup' | 'restructure' | 'proxy';
 export type JobStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed';
 
 export interface Job {
@@ -287,4 +306,95 @@ export interface MusicTrack {
 export interface AppSetting {
   key: string;
   value: string;
+}
+
+// ============================================================================
+// P2 追加型
+// ============================================================================
+
+// ---- A/M7 デバイス・ペアリング ----
+
+export interface Device {
+  id: string;
+  name: string;
+  /** 長期トークン（Authorization に使用）。スマホへは発行時のみ返す。 */
+  token: string;
+  createdAt: number;
+  lastSeen: number;
+  revoked: boolean;
+}
+
+export interface PairingInfo {
+  /** LAN 上の到達先 URL（例 http://192.168.1.10:8787）。 */
+  url: string;
+  /** ペアリング用 PIN（短命）。 */
+  pin: string;
+  /** PIN 有効期限(ms)。 */
+  expiresAt: number;
+}
+
+// ---- C/M11 命名テンプレート ----
+
+/**
+ * トークン: {yyyy} {MM} {dd} {HHmmss} {event} {place} {person} {original} {seq}
+ * 既定: {yyyy}/{yyyy}-{MM}-{dd}_{event}/{yyyy}-{MM}-{dd}_{HHmmss}_{original}
+ */
+export interface NamingTemplate {
+  /** パス区切り '/' を含むテンプレート文字列。 */
+  template: string;
+  /** {event} 未解決時のフォールバック順。 */
+  fallback: ('event' | 'place' | 'date')[];
+  /** date_uncertain の写真を隔離するフォルダ名（自動で誤った年に入れない）。 */
+  uncertainFolder: string;
+  /** 元ファイル名を保持するか（{original} を使うかは template 次第だが保険）。 */
+  keepOriginalName: boolean;
+}
+
+export const DEFAULT_TEMPLATE: NamingTemplate = {
+  template: '{yyyy}/{yyyy}-{MM}-{dd}_{event}/{yyyy}-{MM}-{dd}_{HHmmss}_{original}',
+  fallback: ['event', 'place', 'date'],
+  uncertainFolder: '_日付未確定',
+  keepOriginalName: true,
+};
+
+// ---- C/M11 Before/After 差分 ----
+
+export interface FolderDiffNode {
+  path: string; // ライブラリルートからの相対
+  addedCount: number;
+  children: FolderDiffNode[];
+}
+
+// ---- C/M12 空き容量最適化 ----
+
+export interface SpaceReport {
+  totalBytes: number;
+  reclaimable: {
+    duplicates: number;
+    junk: number;
+    videoProxies: number;
+  };
+  byYear: { year: string; bytes: number; count: number }[];
+  largest: { mediaId: string; sourceRef: string; bytes: number; mediaType: MediaType }[];
+}
+
+// ---- A/M8 スマホ配信 DTO（原本・埋め込みは送らない） ----
+
+export interface StorySummaryDTO {
+  id: string;
+  title: string;
+  kind: StoryKind;
+  startAt: number | null;
+  endAt: number | null;
+  placeName?: string;
+  coverMediaId?: string;
+  itemCount: number;
+}
+
+export interface PersonDTO {
+  id: string;
+  displayName?: string;
+  coverMediaId?: string;
+  isFavorite: boolean;
+  photoCount: number;
 }
