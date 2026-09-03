@@ -37,7 +37,13 @@ export class PersonEngine {
 
   /** 人物一覧（写真枚数順）。スマホへも渡せる DTO（埋め込みは含めない）。 */
   listPersons(): PersonDTO[] {
+    // 顔一覧は 1 回だけ読み、クラスタ別マップと faceId→mediaId マップを構築して使い回す。
+    // 人物ごとに listAllFaces() を呼ぶと O(人物数 × 全顔数) になり大規模で RPC タイムアウトする。
     const facesByCluster = this.facesByCluster();
+    const mediaIdByFace = new Map<string, string>();
+    for (const arr of facesByCluster.values()) {
+      for (const f of arr) mediaIdByFace.set(f.id, f.mediaId);
+    }
     const out: PersonDTO[] = [];
     for (const p of this.store.listActivePersons()) {
       const faces = facesByCluster.get(p.clusterId) ?? [];
@@ -45,7 +51,7 @@ export class PersonEngine {
       out.push({
         id: p.id,
         displayName: p.displayName,
-        coverMediaId: this.coverMediaId(p),
+        coverMediaId: this.coverMediaIdFrom(p, facesByCluster, mediaIdByFace),
         isFavorite: p.isFavorite,
         photoCount: mediaIds.size,
       });
@@ -148,12 +154,16 @@ export class PersonEngine {
     return map;
   }
 
-  private coverMediaId(p: Person): string | undefined {
+  /** 事前構築済みマップからカバー写真を解決する（追加の DB アクセスなし）。 */
+  private coverMediaIdFrom(
+    p: Person,
+    facesByCluster: Map<string, { id: string; mediaId: string }[]>,
+    mediaIdByFace: Map<string, string>,
+  ): string | undefined {
     if (p.coverFaceId) {
-      const face = this.store.listAllFaces().find((f) => f.id === p.coverFaceId);
-      if (face) return face.mediaId;
+      const mediaId = mediaIdByFace.get(p.coverFaceId);
+      if (mediaId) return mediaId;
     }
-    const faces = this.facesByCluster().get(p.clusterId);
-    return faces?.[0]?.mediaId;
+    return facesByCluster.get(p.clusterId)?.[0]?.mediaId;
   }
 }
