@@ -80,7 +80,12 @@ function Player({ timeline, onClose }: { timeline: Timeline; onClose: () => void
 
   const clip = timeline.clips[idx];
   const item = clip ? media[clip.mediaId] : undefined;
-  const src = item?.previewPath || item?.thumbPath;
+  // 派生アセット（プレビュー/サムネ）が未生成でも、写真は原本にフォールバックして表示する。
+  // 動画は原本を背景画像にできないためサムネのみ（無ければプレースホルダ）。
+  const src =
+    item?.previewPath ||
+    item?.thumbPath ||
+    (item?.mediaType === 'photo' ? item?.sourceRef : undefined);
 
   const kb = clip
     ? {

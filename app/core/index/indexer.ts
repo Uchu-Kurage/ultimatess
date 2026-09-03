@@ -53,7 +53,26 @@ export class Indexer {
       const f = files[i];
       const existing = this.store.getMediaBySourceRef(f.path);
       if (existing) {
-        result.skipped += 1;
+        // 既存行でも派生アセット（サムネ/プレビュー）が欠落していれば作り直す。
+        // sharp 未リビルド時などに空パスで保存された行を、DB を消さずに修復できる。
+        if (!existing.thumbPath || !existing.previewPath) {
+          const probed = await this.probe.probe(f);
+          if (probed.thumbPath || probed.previewPath) {
+            this.store.upsertMedia({
+              ...existing,
+              thumbPath: probed.thumbPath || existing.thumbPath,
+              previewPath: probed.previewPath || existing.previewPath,
+              perceptualHash: existing.perceptualHash || probed.perceptualHash,
+              width: existing.width || probed.width,
+              height: existing.height || probed.height,
+            });
+            result.updated += 1;
+          } else {
+            result.skipped += 1;
+          }
+        } else {
+          result.skipped += 1;
+        }
       } else if (looksManagedByOtherApp(f.path)) {
         // 念のため二重チェック。
         result.skipped += 1;

@@ -31,6 +31,9 @@ export class CurationEngine {
     const gapMs = opts.gapMs ?? SIX_HOURS;
     const heroCount = opts.heroCount ?? 3;
 
+    // 再実行で重複を作らないよう、既存のイベントストーリーを一旦クリアしてから作り直す。
+    this.store.deleteStoriesByKind('event');
+
     const dated = this.store
       .allMedia()
       .filter((m) => m.createdAt != null)
@@ -109,6 +112,9 @@ export class CurationEngine {
   async buildPersonStories(opts: PersonStoryOptions = {}): Promise<string[]> {
     const minPhotos = opts.minPhotos ?? 5;
     const heroCount = opts.heroCount ?? 3;
+
+    // 再実行で重複を作らないよう、既存の人物ストーリーを一旦クリアしてから作り直す。
+    this.store.deleteStoriesByKind('person');
 
     // cluster_id -> その人物が写る mediaId 集合
     const mediaByCluster = new Map<string, Set<string>>();

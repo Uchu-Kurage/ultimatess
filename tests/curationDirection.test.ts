@@ -54,6 +54,20 @@ describe('CurationEngine イベント分割', () => {
     expect(stories).toHaveLength(2);
   });
 
+  it('再実行しても重複ストーリーを作らない（既存イベントをクリアして作り直す）', async () => {
+    const store = new InMemoryStore();
+    const base = Date.UTC(2024, 5, 1, 10, 0, 0);
+    addMedia(store, base);
+    addMedia(store, base + 20 * H); // 2 イベントぶん
+    const cur = new CurationEngine(store);
+    const first = await cur.buildEventStories();
+    expect(first).toHaveLength(2);
+    // もう一度押しても増殖しない。
+    const second = await cur.buildEventStories();
+    expect(second).toHaveLength(2);
+    expect(store.listStories()).toHaveLength(2);
+  });
+
   it('場所が変わると別イベントに分かれる', async () => {
     const store = new InMemoryStore();
     const base = Date.UTC(2024, 5, 1, 10, 0, 0);

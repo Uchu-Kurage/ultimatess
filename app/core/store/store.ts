@@ -106,6 +106,8 @@ export interface Store {
   createStory(story: Story): void;
   listStories(): Story[];
   getStory(id: string): Story | null;
+  /** 指定 kind のストーリーと、その story_item / timeline / timeline_clip を削除する。 */
+  deleteStoriesByKind(kind: Story['kind']): void;
   replaceStoryItems(storyId: string, items: StoryItem[]): void;
   listStoryItems(storyId: string): StoryItem[];
   upsertTimeline(timeline: Timeline): void;

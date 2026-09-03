@@ -387,6 +387,25 @@ export class SqliteStore implements Store {
     const r = this.db.prepare(`SELECT * FROM story WHERE id = ?`).get(id) as any;
     return r ? rowToStory(r) : null;
   }
+  deleteStoriesByKind(kind: Story['kind']): void {
+    const tx = this.db.transaction(() => {
+      const ids = (
+        this.db.prepare(`SELECT id FROM story WHERE kind = ?`).all(kind) as { id: string }[]
+      ).map((r) => r.id);
+      for (const id of ids) {
+        const timelineIds = (
+          this.db.prepare(`SELECT id FROM timeline WHERE story_id = ?`).all(id) as { id: string }[]
+        ).map((t) => t.id);
+        for (const tid of timelineIds) {
+          this.db.prepare(`DELETE FROM timeline_clip WHERE timeline_id = ?`).run(tid);
+        }
+        this.db.prepare(`DELETE FROM timeline WHERE story_id = ?`).run(id);
+        this.db.prepare(`DELETE FROM story_item WHERE story_id = ?`).run(id);
+        this.db.prepare(`DELETE FROM story WHERE id = ?`).run(id);
+      }
+    });
+    tx();
+  }
   replaceStoryItems(storyId: string, items: StoryItem[]): void {
     const tx = this.db.transaction(() => {
       this.db.prepare(`DELETE FROM story_item WHERE story_id = ?`).run(storyId);

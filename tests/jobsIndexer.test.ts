@@ -109,6 +109,25 @@ class FakeProbe implements MediaProbe {
   }
 }
 
+// サムネ有無を切り替えられる Probe（rebuild 前後を模擬）。
+class SwitchableProbe implements MediaProbe {
+  thumbs = false;
+  async probe(file: ScannedFile): Promise<ProbeResult> {
+    return {
+      mediaType: 'photo',
+      width: 100,
+      height: 100,
+      createdAt: file.mtime,
+      dateUncertain: false,
+      orientation: 1,
+      contentHash: 'ch-' + file.path,
+      perceptualHash: '0000000000000000',
+      thumbPath: this.thumbs ? '/cache/thumb/' + file.path + '.jpg' : '',
+      previewPath: this.thumbs ? '/cache/preview/' + file.path + '.jpg' : '',
+    };
+  }
+}
+
 describe('Indexer 差分・再開', () => {
   it('走査してメディアを投入し、再実行では重複なくスキップ', async () => {
     const base = await tmpDir();
@@ -142,6 +161,44 @@ describe('Indexer 差分・再開', () => {
     const r3 = await indexer.indexRoot(root.id);
     expect(r3.added).toBe(1);
     expect(store.countMedia()).toBe(3);
+  });
+
+  it('派生アセット欠落の既存行を再実行で修復する（サムネ再生成）', async () => {
+    const base = await tmpDir();
+    cleanups.push(base);
+    await writeFile(path.join(base, 'a.jpg'), 'a');
+
+    const store = new InMemoryStore();
+    const root: RootFolder = {
+      id: newId('root'),
+      path: base,
+      isOnline: true,
+      managedByOtherApp: false,
+    };
+    store.addRoot(root);
+
+    // 初回は sharp 未リビルド相当で thumb/preview が空。
+    const probe = new SwitchableProbe();
+    const indexer = new Indexer(store, new LocalFolderProvider(), probe);
+    const r1 = await indexer.indexRoot(root.id);
+    expect(r1.added).toBe(1);
+    const idFirst = store.listMedia(0, 10)[0].id;
+    expect(store.getMedia(idFirst)!.thumbPath).toBe('');
+
+    // rebuild 後相当: probe がサムネを返すようになる → 再実行で欠落行を修復。
+    probe.thumbs = true;
+    const r2 = await indexer.indexRoot(root.id);
+    expect(r2.added).toBe(0);
+    expect(r2.updated).toBe(1);
+    expect(r2.skipped).toBe(0);
+    const repaired = store.getMedia(idFirst)!;
+    expect(repaired.thumbPath).not.toBe('');
+    expect(repaired.previewPath).not.toBe('');
+
+    // さらに再実行すると、もう欠落していないのでスキップ。
+    const r3 = await indexer.indexRoot(root.id);
+    expect(r3.updated).toBe(0);
+    expect(r3.skipped).toBe(1);
   });
 
   it('managedByOtherApp のライブラリ配下は走査しない', async () => {
