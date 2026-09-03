@@ -9,3 +9,10 @@ coverage/
 /.appdata/
 *.sqlite
 *.sqlite-*
+# ONNX/重みモデルの本体は大きいのでコミットしない（models.json.example と README は追跡する）
+app/models/*.onnx
+app/models/*.ort
+app/models/*.dat
+app/models/*.pt
+app/models/*.pth
+app/models/models.json
