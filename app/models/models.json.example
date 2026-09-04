@@ -1,16 +1,19 @@
 {
-  "//": "実 ONNX モデルを app/models/ に置き、このファイルを models.json にリネームすると NodeMLAdapter が有効になります。ファイルが揃わない間は自動的に MockMLAdapter が使われます。",
+  "//": "実 ONNX モデルを app/models/ に置き、このファイルを models.json にリネームすると NodeMLAdapter が有効になります（両モデルが揃わない間は自動的に MockMLAdapter）。既定は YuNet(検出) + ArcFace(埋め込み)。",
   "faceDetector": {
-    "file": "face_detection_yunet.onnx",
+    "file": "face_detection_yunet_2023mar.onnx",
     "inputSize": [320, 320],
     "scoreThreshold": 0.6,
-    "nmsThreshold": 0.4,
-    "format": "yunet15"
+    "nmsThreshold": 0.3,
+    "format": "yunet",
+    "strides": [8, 16, 32],
+    "colorOrder": "bgr"
   },
   "faceEmbedder": {
-    "file": "arcface_r50.onnx",
+    "file": "arcfaceresnet100-8.onnx",
     "inputSize": [112, 112],
     "mean": 127.5,
-    "std": 128.0
+    "std": 128.0,
+    "colorOrder": "rgb"
   }
 }

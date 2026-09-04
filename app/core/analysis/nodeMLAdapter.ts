@@ -1,14 +1,18 @@
 // ============================================================================
 // NodeMLAdapter — onnxruntime-node による実オンデバイス ML (設計書 §5.3 / §8)。
-// - 顔検出(YuNet/SCRFD 想定) → 埋め込み(ArcFace 512d) → 品質ヒューリスティック。
+// - 顔検出(YuNet) → 埋め込み(ArcFace 512d) → 品質ヒューリスティック。
 // - GPU 実行プロバイダ(Mac=CoreML / Win=DirectML)を試し、無ければ CPU にフォールバック。
 // - モデルは app/models/ に置き、models.json のマニフェストで差し替える。
 //
-// 重要(正直な注記): 顔検出の出力デコードはモデルのエクスポート形式に依存する。
-// ここでは「YuNet を [N,15]=(x,y,w,h, landmarks×10, score) に後処理して出力する」
-// 一般的な形式を実装しているが、採用モデルに合わせて decodeDetections を要調整。
-// この環境では実モデル・ネイティブ実行ができないため未実行。埋め込みと前処理・NMS の
-// 純ロジックは detectUtils のテストで担保している。
+// 採用モデル既定: YuNet(OpenCV Zoo, Apache-2.0) + ArcFace(ONNX Model Zoo, 512d)。
+//  - YuNet: format='yunet'。stretch リサイズ + BGR、ストライド{8,16,32}のマルチ出力を
+//    decodeYuNet(純関数・yunet.ts)で復元。座標は入力→元画像へ軸別スケールで戻す。
+//  - format='yunet15' は「後処理を焼き込んだ [N,15] 単一出力」向けの互換パス。
+//  - ArcFace: 112x112・RGB・(x-127.5)/128・512d を L2 正規化。
+//
+// 注記: この環境では実モデル・ネイティブ実行ができないため未実行。デコード算術は
+// tests/yunet.test.ts、前処理/後処理の純ロジックは tests/detectUtils.test.ts で担保。
+// より高精度にするには 5 点ランドマークによる顔アライメントが有効（将来拡張）。
 // ============================================================================
 
 import * as fs from 'node:fs/promises';
@@ -22,23 +26,37 @@ import {
   unletterboxBBox,
   type ScoredBox,
 } from './detectUtils.js';
+import { decodeYuNet, type RawOutput } from './yunet.js';
+
+export type ColorOrder = 'rgb' | 'bgr';
 
 export interface DetectorConfig {
   file: string;
   inputSize: [number, number]; // [W,H]
   scoreThreshold: number;
   nmsThreshold: number;
-  format: 'yunet15';
+  format: 'yunet' | 'yunet15';
+  /** YuNet のストライド（既定 [8,16,32]）。 */
+  strides?: number[];
+  /** 入力の色順（YuNet は bgr 推奨）。 */
+  colorOrder?: ColorOrder;
 }
 export interface EmbedderConfig {
   file: string;
   inputSize: [number, number]; // [W,H]
   mean: number;
   std: number;
+  /** 入力の色順（ArcFace は rgb）。 */
+  colorOrder?: ColorOrder;
 }
 export interface ModelManifest {
   faceDetector?: DetectorConfig;
   faceEmbedder?: EmbedderConfig;
+}
+
+interface PreprocessOpts {
+  fit: 'fill' | 'contain';
+  colorOrder: ColorOrder;
 }
 
 function executionProviders(): string[] {
@@ -65,9 +83,7 @@ export class NodeMLAdapter implements MLAdapter {
   private async session(file: string): Promise<any> {
     const ort = await this.ortModule();
     const full = path.join(this.modelsDir, file);
-    const eps = executionProviders();
-    // GPU EP → 失敗したら CPU にフォールバック。
-    for (const ep of eps) {
+    for (const ep of executionProviders()) {
       try {
         return await ort.InferenceSession.create(full, { executionProviders: [ep] });
       } catch {
@@ -77,30 +93,36 @@ export class NodeMLAdapter implements MLAdapter {
     return ort.InferenceSession.create(full, { executionProviders: ['cpu'] });
   }
 
-  // ---- 前処理: RGB CHW Float32 テンソル（レターボックス） ----
+  /** RGB/BGR・CHW・Float32 のテンソルを作る。fit='fill' は stretch、'contain' は letterbox。 */
   private async toInputTensor(
     img: Buffer,
     targetW: number,
     targetH: number,
     normalize: (v: number) => number,
+    opts: PreprocessOpts,
   ): Promise<{ tensor: any; srcW: number; srcH: number }> {
     const sharp = (await import('sharp')).default;
     const meta = await sharp(img).metadata();
     const srcW = meta.width ?? targetW;
     const srcH = meta.height ?? targetH;
-    // アスペクト比維持で収め、黒でパディング。
     const resized = await sharp(img)
-      .resize(targetW, targetH, { fit: 'contain', background: { r: 0, g: 0, b: 0 } })
+      .resize(targetW, targetH, {
+        fit: opts.fit === 'fill' ? 'fill' : 'contain',
+        background: { r: 0, g: 0, b: 0 },
+      })
       .removeAlpha()
       .raw()
-      .toBuffer(); // RGBRGB... length = targetW*targetH*3
+      .toBuffer(); // RGBRGB...
     const ort = await this.ortModule();
     const chw = new Float32Array(3 * targetW * targetH);
     const plane = targetW * targetH;
+    // 出力プレーン順を色順に合わせる（bgr は B,G,R）。
+    const first = opts.colorOrder === 'bgr' ? 2 : 0;
+    const third = opts.colorOrder === 'bgr' ? 0 : 2;
     for (let i = 0; i < plane; i++) {
-      chw[i] = normalize(resized[i * 3]); // R
-      chw[plane + i] = normalize(resized[i * 3 + 1]); // G
-      chw[2 * plane + i] = normalize(resized[i * 3 + 2]); // B
+      chw[i] = normalize(resized[i * 3 + first]);
+      chw[plane + i] = normalize(resized[i * 3 + 1]);
+      chw[2 * plane + i] = normalize(resized[i * 3 + third]);
     }
     const tensor = new ort.Tensor('float32', chw, [1, 3, targetH, targetW]);
     return { tensor, srcW, srcH };
@@ -111,37 +133,54 @@ export class NodeMLAdapter implements MLAdapter {
     if (!cfg) return [];
     if (!this.detector) this.detector = await this.session(cfg.file);
     const [w, h] = cfg.inputSize;
-    const { tensor, srcW, srcH } = await this.toInputTensor(img, w, h, (v) => v); // YuNet は 0..255 生値
-    const feeds: Record<string, any> = { [this.detector.inputNames[0]]: tensor };
-    const results = await this.detector.run(feeds);
-    const out = results[this.detector.outputNames[0]];
-    const scored = this.decodeDetections(out, cfg, srcW, srcH);
+
+    const scored =
+      cfg.format === 'yunet'
+        ? await this.runYuNet(cfg, img, w, h)
+        : await this.runYuNet15(cfg, img, w, h);
+
     const kept = nms(scored, cfg.nmsThreshold);
     return kept.map((s) => ({
       bbox: s.bbox,
       quality: s.score,
-      eyesOpen: true, // 目つむり判定は landmark/別モデルが要る。P1 は簡易。
+      eyesOpen: true,
       ...(s.landmarks ? { landmarks: s.landmarks } : {}),
     }));
   }
 
-  /**
-   * 検出テンソルを ScoredBox に変換。format='yunet15' は 1 行 15 要素:
-   * [x, y, w, h, lm0x, lm0y, ..., lm4x, lm4y, score]（入力画像ピクセル座標）。
-   * 採用モデルの形式に合わせて調整すること。
-   */
-  private decodeDetections(
-    out: any,
-    cfg: DetectorConfig,
-    srcW: number,
-    srcH: number,
-  ): ScoredBox[] {
+  /** YuNet: stretch + BGR、マルチストライド出力を decodeYuNet で復元。 */
+  private async runYuNet(cfg: DetectorConfig, img: Buffer, w: number, h: number): Promise<ScoredBox[]> {
+    const { tensor, srcW, srcH } = await this.toInputTensor(img, w, h, (v) => v, {
+      fit: 'fill',
+      colorOrder: cfg.colorOrder ?? 'bgr',
+    });
+    const feeds: Record<string, any> = { [this.detector.inputNames[0]]: tensor };
+    const results = await this.detector.run(feeds);
+    const outputs: Record<string, RawOutput> = {};
+    for (const name of this.detector.outputNames) {
+      outputs[name] = { data: results[name].data as Float32Array, dims: results[name].dims as number[] };
+    }
+    return decodeYuNet(
+      outputs,
+      { inputW: w, inputH: h, strides: cfg.strides ?? [8, 16, 32], scoreThreshold: cfg.scoreThreshold },
+      srcW,
+      srcH,
+    );
+  }
+
+  /** 後処理を焼き込んだ [N,15]=(x,y,w,h, landmarks×10, score) 単一出力向け（letterbox）。 */
+  private async runYuNet15(cfg: DetectorConfig, img: Buffer, w: number, h: number): Promise<ScoredBox[]> {
+    const { tensor, srcW, srcH } = await this.toInputTensor(img, w, h, (v) => v, {
+      fit: 'contain',
+      colorOrder: cfg.colorOrder ?? 'bgr',
+    });
+    const feeds: Record<string, any> = { [this.detector.inputNames[0]]: tensor };
+    const results = await this.detector.run(feeds);
+    const out = results[this.detector.outputNames[0]];
     const data = out.data as Float32Array;
-    const dims = out.dims as number[];
     const stride = 15;
-    const rows = dims[dims.length - 1] === stride ? data.length / stride : dims[0];
-    const [inW, inH] = cfg.inputSize;
-    const lb = letterbox(srcW, srcH, inW, inH);
+    const rows = data.length / stride;
+    const lb = letterbox(srcW, srcH, w, h);
     const boxes: ScoredBox[] = [];
     for (let i = 0; i < rows; i++) {
       const o = i * stride;
@@ -167,7 +206,7 @@ export class NodeMLAdapter implements MLAdapter {
     const meta = await sharp(img).metadata();
     const W = meta.width ?? 0;
     const H = meta.height ?? 0;
-    // 顔領域を切り出す（範囲をクランプ）。
+    // 顔領域を切り出す（範囲をクランプ）。※5点アライメントを入れると精度向上。
     const [fx, fy, fw, fh] = face.bbox;
     const left = Math.max(0, Math.min(W - 1, Math.round(fx)));
     const top = Math.max(0, Math.min(H - 1, Math.round(fy)));
@@ -175,7 +214,10 @@ export class NodeMLAdapter implements MLAdapter {
     const height = Math.max(1, Math.min(H - top, Math.round(fh)));
     const crop = await sharp(img).extract({ left, top, width, height }).toBuffer();
     const [w, h] = cfg.inputSize;
-    const { tensor } = await this.toInputTensor(crop, w, h, (v) => (v - cfg.mean) / cfg.std);
+    const { tensor } = await this.toInputTensor(crop, w, h, (v) => (v - cfg.mean) / cfg.std, {
+      fit: 'fill',
+      colorOrder: cfg.colorOrder ?? 'rgb',
+    });
     const feeds: Record<string, any> = { [this.embedder.inputNames[0]]: tensor };
     const results = await this.embedder.run(feeds);
     const emb = results[this.embedder.outputNames[0]].data as Float32Array;
@@ -188,9 +230,7 @@ export class NodeMLAdapter implements MLAdapter {
     try {
       const gray = sharp(img).removeAlpha().greyscale();
       const stats = await gray.clone().stats();
-      const meanLum = (stats.channels[0]?.mean ?? 128) / 255; // 0..1
-
-      // Laplacian で高周波成分の分散を測りブレを推定。
+      const meanLum = (stats.channels[0]?.mean ?? 128) / 255;
       const { data } = await gray
         .clone()
         .resize(256, 256, { fit: 'inside' })
@@ -203,10 +243,9 @@ export class NodeMLAdapter implements MLAdapter {
       let variance = 0;
       for (let i = 0; i < data.length; i++) variance += (data[i] - mean) ** 2;
       variance /= data.length;
-      const sharpness = clamp01(variance / 500); // 経験的スケール
-      // 露出: 中庸(0.5)からの距離が近いほど良い。
+      const sharpness = clamp01(variance / 500);
       const exposure = clamp01(1 - Math.abs(meanLum - 0.5) * 2);
-      const composition = 0.5; // 構図は別モデル。既定中庸。
+      const composition = 0.5;
       const eyesOpen = 0.8;
       const composite = sharpness * 0.4 + exposure * 0.3 + composition * 0.15 + eyesOpen * 0.15;
       return { sharpness, exposure, composition, eyesOpen, composite };

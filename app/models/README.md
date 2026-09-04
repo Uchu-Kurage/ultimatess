@@ -17,10 +17,35 @@
 
 GPU 実行プロバイダ（Mac=CoreML / Win=DirectML）を試し、利用できなければ CPU にフォールバックします。
 
-> **注記（正直に）**: 顔検出の出力デコード（`NodeMLAdapter.decodeDetections`）は
-> モデルのエクスポート形式に依存します。既定は「YuNet を `[N,15]=(x,y,w,h, landmarks×10, score)`
-> に後処理して出力する」一般形式を実装していますが、採用モデルに合わせて調整が必要な場合があります。
-> レターボックス座標変換・IoU・NMS・L2 正規化の純ロジックは `tests/detectUtils.test.ts` で検証済みです。
+## 採用モデル（既定）と入手コマンド
+
+**顔検出: YuNet（OpenCV Zoo・Apache-2.0）**
+```bash
+curl -L -o app/models/face_detection_yunet_2023mar.onnx \
+  https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+```
+**顔埋め込み: ArcFace（ONNX Model Zoo・512d）**
+```bash
+curl -L -o app/models/arcfaceresnet100-8.onnx \
+  https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-8.onnx
+```
+（LFS 管理のため `raw.githubusercontent.com` ではなく `github.com/.../raw/` を使う。落としたファイルが
+`version https://git-lfs...` で始まっていたらポインタなので取り直す。）
+
+## デコード・前処理の実装状況
+
+`NodeMLAdapter` は次の2形式に対応:
+- **`format: "yunet"`（既定）**: YuNet の生 ONNX 出力（ストライド {8,16,32} の cls/obj/bbox/kps マルチ出力）を
+  `decodeYuNet`（`app/core/analysis/yunet.ts`）で OpenCV `FaceDetectorYN` と同じ後処理で復元。
+  入力は **stretch リサイズ + BGR**、座標は入力→元画像へ軸別スケールで戻す。
+- **`format: "yunet15"`**: 後処理を焼き込んだ `[N,15]=(x,y,w,h, landmarks×10, score)` 単一出力向け（letterbox）。
+
+埋め込みは **112×112・RGB・`(x-127.5)/128`・512d を L2 正規化**（`colorOrder`/`mean`/`std` で調整可）。
+`models.json` の `format` / `strides` / `colorOrder` で採用モデルに合わせられます。
+
+> **未検証（正直に）**: 実 ONNX・onnxruntime・sharp のネイティブ実行はこの環境では行えていません。
+> デコード算術は `tests/yunet.test.ts`、前処理/後処理の純ロジックは `tests/detectUtils.test.ts` で担保済みですが、
+> 実モデルを繋いだE2Eは実機で確認が必要です。精度をさらに上げるには 5 点ランドマークによる顔アライメントが有効です。
 
 ## 想定モデル（P1 §8）
 
