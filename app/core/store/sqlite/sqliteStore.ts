@@ -133,6 +133,22 @@ export class SqliteStore implements Store {
   setAnalysisStatus(id: string, status: AnalysisStatus): void {
     this.db.prepare(`UPDATE media_item SET analysis_status = ? WHERE id = ?`).run(status, id);
   }
+  resetAnalysis(): void {
+    const tx = this.db.transaction(() => {
+      this.db.exec(
+        `DELETE FROM face;
+         DELETE FROM quality_score;
+         DELETE FROM scene_label;
+         DELETE FROM duplicate_member;
+         DELETE FROM duplicate_group;
+         DELETE FROM person;
+         DELETE FROM face_feedback;
+         DELETE FROM cluster_merge_log;
+         UPDATE media_item SET analysis_status = 'pending';`,
+      );
+    });
+    tx();
+  }
 
   // ---- 顔 / 人物 ----
   insertFace(f: Face): void {

@@ -177,6 +177,12 @@ export class CoreApp {
         const jobId = this.orchestrator.enqueue('analyze', { rootId: p.rootId });
         return { jobId } as IpcResponse<C>;
       }
+      case 'analyze:reanalyzeAll': {
+        // 解析結果(顔/埋め込み/クラスタ/人物/訂正)を破棄し、全メディアを再解析。
+        this.store.resetAnalysis();
+        const jobId = this.orchestrator.enqueue('analyze', {});
+        return { jobId } as IpcResponse<C>;
+      }
 
       case 'organize:proposeDedup':
         return (await this.organize.proposeDedup()) as IpcResponse<C>;

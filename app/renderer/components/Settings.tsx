@@ -29,6 +29,23 @@ export function Settings({
     await fm.invoke('index:start', { rootId: r.id });
   };
 
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const reanalyzeAll = async (): Promise<void> => {
+    const ok = window.confirm(
+      '全メディアを最初から解析し直します。\n' +
+        '・原本と索引（写真一覧・サムネ）は保持されます\n' +
+        '・顔・人物クラスタ・付けた名前・訂正はいったん破棄され、作り直されます\n' +
+        'モデルを差し替えた後などに実行してください。よろしいですか？',
+    );
+    if (!ok) return;
+    setReanalyzing(true);
+    try {
+      await fm.invoke('analyze:reanalyzeAll', {});
+    } finally {
+      setReanalyzing(false);
+    }
+  };
+
   return (
     <div className="settings">
       <section className="card">
@@ -70,6 +87,17 @@ export function Settings({
             追加して索引
           </button>
         </div>
+      </section>
+
+      <section className="card">
+        <h2>解析のやり直し</h2>
+        <p className="hint">
+          ML モデルを差し替えたとき（例: モックから実 ONNX モデルへ）に使います。索引済みの写真は
+          そのまま、顔・人物・クラスタだけを作り直します。進捗は「ジョブ」タブで確認できます。
+        </p>
+        <button className="btn" onClick={reanalyzeAll} disabled={reanalyzing}>
+          {reanalyzing ? '開始中…' : '全解析をやり直す'}
+        </button>
       </section>
 
       <section className="card">

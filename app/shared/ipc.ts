@@ -49,6 +49,8 @@ export interface IpcRequestMap {
 
   // 解析
   'analyze:start': { req: { rootId?: string }; res: { jobId: string } };
+  /** 解析結果を全消去して最初から解析し直す（モデル差し替え時など）。原本・索引は保持。 */
+  'analyze:reanalyzeAll': { req: Record<string, never>; res: { jobId: string } };
 
   // 整理エンジン
   'organize:proposeDedup': { req: Record<string, never>; res: OrganizeProposal };

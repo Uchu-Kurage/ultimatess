@@ -54,6 +54,12 @@ export interface Store {
   allMedia(): MediaItem[];
   updateSourceRef(id: string, newPath: string): void;
   setAnalysisStatus(id: string, status: AnalysisStatus): void;
+  /**
+   * 解析結果を全消去し、全メディアを再解析対象(pending)に戻す。
+   * 原本・索引(media_item)・ルートは保持し、顔/埋め込み/品質/シーン/重複/人物/訂正を破棄する。
+   * モデル差し替え時（Mock→実モデル等）にゼロから解析し直すために使う。
+   */
+  resetAnalysis(): void;
 
   // ---- 顔 / 人物 ----
   insertFace(face: Face): void;
