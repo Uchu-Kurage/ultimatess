@@ -12,7 +12,7 @@ import type {
   IpcChannel,
   IpcRequest,
 } from '../shared/ipc.js';
-import { createMLAdapter } from './analysis/mlAdapterFactory.js';
+import { selectMLAdapter } from './analysis/mlAdapterFactory.js';
 import { CoreApp } from './coreApp.js';
 import { NodeFileOpAdapter } from './fileop/nodeFileOpAdapter.js';
 import { NodeMediaProbe } from './index/nodeMediaProbe.js';
@@ -36,7 +36,10 @@ async function main(): Promise<void> {
   const mobileIndexPath = resolveMobileIndex();
   // 実 ONNX モデルがあれば NodeMLAdapter、無ければ MockMLAdapter を使う。
   const modelsDir = resolveModelsDir();
-  const ml = await createMLAdapter(modelsDir);
+  const { adapter: ml, description: mlDescription } = await selectMLAdapter(modelsDir);
+  // どちらのアダプタを使うか（＋フォールバック理由）を起動ログに出す。
+  console.log(`[core] ML: ${mlDescription}`);
+  post({ type: 'event', event: 'log', payload: { level: 'info', message: `ML: ${mlDescription}` } });
   const core = new CoreApp({
     store,
     fileop,
